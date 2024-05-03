@@ -3,3 +3,4 @@ backup/*
 *.bak
 ip_list.txt
 config.conf
+add_backup_user.rsc

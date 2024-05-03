@@ -12,6 +12,8 @@ from time import localtime
 from time import strftime 
 from time import sleep 
 from distutils.version import LooseVersion
+from email.utils import formatdate
+
 try:
     import paramiko
 except ImportError:
@@ -40,7 +42,7 @@ class Router():
     def __init__(self, ip, port):
         self.ip = ip
         self.port = port
-        self.timestamp = strftime("%d-%m-%Y (%H-%M)", localtime())
+        self.timestamp = strftime("%Y-%m-%d (%H-%M)", localtime())
         self.start_time=datetime.datetime.now()
         self.ssh_client = paramiko.SSHClient()
         self.diff_report = ""
@@ -62,7 +64,8 @@ class Router():
         try:
             if config['auth_method'] == "key": 
                 self.ssh_client.connect(hostname = self.ip, port = int(self.port), timeout = 3,
-                                        username=config['Login'],pkey = config['pkey'])
+                                        username=config['Login'],pkey = config['pkey'],
+                                        disabled_algorithms=dict(pubkeys=["rsa-sha2-512", "rsa-sha2-256"]))
             else:
                 self.ssh_client.connect(hostname = self.ip, port = int(self.port), timeout = 3,
                                         look_for_keys = False, allow_agent = False,
@@ -140,7 +143,10 @@ class Router():
             self.identity = self.ssh_cmd(":put [/system identity get name]").rstrip()
             self.serial_number = self.ssh_cmd(":put [/system routerboard get serial-number]").rstrip()
             self.version = self.ssh_cmd(":put [system resource get version]").rstrip()
-            self.remote_mt_cfg = '\n'.join(self.ssh_cmd("/export").split('\r\n')[3:])
+            self.remote_mt_cfg = re.sub(r'\\\n\s+', '', '\n'.join(self.ssh_cmd("/export").split('\r\n')[3:]))
+            self.remote_mt_cfg += '\n'.join(self.ssh_cmd("/user export").split('\r\n')[5:])
+            for req_cmd in ('/user ssh-keys print detail', '/system routerboard print', '/system package update print', '/system history print detail'):
+                self.remote_mt_cfg += '\n# > '+req_cmd+'\n#' + '\n#'.join(self.ssh_cmd(req_cmd).split('\r\n'))
             self.backup_dir_name = "{0}-{1}-{2}".format(self.ip, self.identity, self.serial_number)
             if not (self.remote_mt_cfg and self.identity and self.version and self.serial_number):
                 self.error = "Can't get data from {0}@{1}:{2}\n".format(config['Login'], self.ip, str(self.port))
@@ -217,7 +223,7 @@ def sendmail(smtp_serv, login, passwd, mail_from, mail_to, subject, body):
         server = smtplib.SMTP(smtp_serv)
         server.starttls()
         server.login(login,passwd)
-        headers = "From: %s\r\nTo: %s\r\nSubject: %s\r\nX-Mailer: My-Mail\r\n\r\n" % (mail_from, mail_to, subject)
+        headers = "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nX-Mailer: My-Mail\r\n\r\n" % (mail_from, mail_to, subject, formatdate(localtime=True))
         server.sendmail(mail_from, mail_to, headers + body)
         server.quit()
     except smtplib.SMTPAuthenticationError:
